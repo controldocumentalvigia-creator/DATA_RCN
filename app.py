@@ -151,7 +151,16 @@ def leer_mejor_hoja(archivo_bytes: bytes, preferidas: tuple, claves: tuple):
 def preparar_data(df: pd.DataFrame) -> pd.DataFrame:
     columnas = {
         "fecha": buscar_columna(df, ["Fecha Servicio"]),
-        "orden": buscar_columna(df, ["No. Orden Servicio"]),
+        "orden": buscar_columna(
+            df,
+            [
+                "No. Orden Servicio",
+                "No.OrdenServicio",
+                "No Orden Servicio",
+                "NoOrdenServicio",
+                "Orden Servicio",
+            ],
+        ),
         "estado": buscar_columna(df, ["Estado Servicio"]),
         "centro": buscar_columna(df, ["Centro / Orden Costo"]),
         "modalidad_servicio": buscar_columna(df, ["Modalidad de Servicio"]),
@@ -162,7 +171,11 @@ def preparar_data(df: pd.DataFrame) -> pd.DataFrame:
     }
     faltantes = [k for k in ["fecha", "orden", "estado"] if columnas[k] is None]
     if faltantes:
-        raise ValueError(f"DATA no contiene columnas obligatorias: {', '.join(faltantes)}")
+        encabezados = ", ".join(str(c) for c in df.columns[:30])
+        raise ValueError(
+            f"DATA no contiene columnas obligatorias: {', '.join(faltantes)}. "
+            f"Encabezados detectados: {encabezados}"
+        )
 
     out = pd.DataFrame({
         "DATA_FECHA_SERVICIO": convertir_fecha(df[columnas["fecha"]]),
@@ -189,7 +202,16 @@ def preparar_data(df: pd.DataFrame) -> pd.DataFrame:
 def preparar_pat(df: pd.DataFrame) -> pd.DataFrame:
     columnas = {
         "fecha": buscar_columna(df, ["Fecha Servicio"]),
-        "orden": buscar_columna(df, ["No. Orden Servicio", "SERVICIO"]),
+        "orden": buscar_columna(
+            df,
+            [
+                "No. Orden Servicio",
+                "No.OrdenServicio",
+                "No Orden Servicio",
+                "NoOrdenServicio",
+                "SERVICIO",
+            ],
+        ),
         "remesa": buscar_columna(df, ["REMESAS", "REMESA"]),
         "estado": buscar_columna(df, ["Estado"]),
         "centro": buscar_columna(df, ["Centro / Orden Costo"]),
@@ -429,12 +451,24 @@ try:
     hoja_data, raw_data = leer_mejor_hoja(
         f_data.getvalue(),
         ("Sheet1",),
-        ("Fecha Servicio", "No. Orden Servicio", "Estado Servicio"),
+        (
+            "Fecha Servicio",
+            "No. Orden Servicio",
+            "No.OrdenServicio",
+            "Estado Servicio",
+        ),
     )
     hoja_pat, raw_pat = leer_mejor_hoja(
         f_pat.getvalue(),
         ("ACTUALIZADO", "BASE"),
-        ("Fecha Servicio", "No. Orden Servicio", "REMESAS", "Estado"),
+        (
+            "Fecha Servicio",
+            "No. Orden Servicio",
+            "No.OrdenServicio",
+            "SERVICIO",
+            "REMESAS",
+            "Estado",
+        ),
     )
     hoja_tray, raw_tray = leer_mejor_hoja(
         f_tray.getvalue(),
