@@ -289,7 +289,56 @@ def unir_unicos(serie: pd.Series):
 
 
 def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
-    data_ag = (
+    """
+    Genera dos productos distintos:
+
+    1. CRUCE_DATA_PAT:
+       DATA es la base principal para el análisis operativo.
+       Conserva todos los registros y todos los meses de DATA.
+
+    2. BASE_MAESTRA_RCN:
+       TRAYECTOS es la base principal para el análisis financiero.
+       Se enriquece con PAT por remesa y con DATA por Fecha + Orden.
+    """
+
+    # =========================================================
+    # A. CRUCE OPERATIVO: DATA como base principal
+    # =========================================================
+    pat_por_llave = (
+        pat.groupby("LLAVE_DATA_PAT", as_index=False)
+        .agg(
+            PAT_REGISTROS=("LLAVE_DATA_PAT", "size"),
+            PAT_FECHA_SERVICIO=("PAT_FECHA_SERVICIO", "min"),
+            PAT_ORDEN_SERVICIO=("PAT_ORDEN_SERVICIO", primer_valido),
+            PAT_REMESA=("PAT_REMESA", unir_unicos),
+            PAT_REMESA_NORM=("PAT_REMESA_NORM", unir_unicos),
+            PAT_ESTADO=("PAT_ESTADO", unir_unicos),
+            PAT_CENTRO_ORDEN_COSTO=("PAT_CENTRO_ORDEN_COSTO", unir_unicos),
+            PAT_MODALIDAD=("PAT_MODALIDAD", unir_unicos),
+            PAT_MODALIDAD_TARIFA=("PAT_MODALIDAD_TARIFA", unir_unicos),
+            PAT_ORIGEN=("PAT_ORIGEN", unir_unicos),
+            PAT_DESTINO=("PAT_DESTINO", unir_unicos),
+        )
+    )
+
+    cruce_data_pat = data.merge(
+        pat_por_llave,
+        on="LLAVE_DATA_PAT",
+        how="left",
+    )
+
+    cruce_data_pat["COINCIDE_DATA_PAT"] = (
+        cruce_data_pat["PAT_REGISTROS"].fillna(0).gt(0)
+    )
+    cruce_data_pat["DIF_DIAS_DATA_PAT"] = (
+        cruce_data_pat["PAT_FECHA_SERVICIO"]
+        - cruce_data_pat["DATA_FECHA_SERVICIO"]
+    ).dt.days
+
+    # =========================================================
+    # B. CRUCE INTERNO PAT -> DATA para enriquecer remesas
+    # =========================================================
+    data_por_llave = (
         data.groupby("LLAVE_DATA_PAT", as_index=False)
         .agg(
             DATA_REGISTROS=("LLAVE_DATA_PAT", "size"),
@@ -306,13 +355,24 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         )
     )
 
-    pat_data = pat.merge(data_ag, on="LLAVE_DATA_PAT", how="left")
-    pat_data["COINCIDE_DATA_PAT"] = pat_data["DATA_REGISTROS"].fillna(0).gt(0)
+    pat_data = pat.merge(
+        data_por_llave,
+        on="LLAVE_DATA_PAT",
+        how="left",
+    )
+    pat_data["COINCIDE_DATA_PAT"] = (
+        pat_data["DATA_REGISTROS"].fillna(0).gt(0)
+    )
     pat_data["DIF_DIAS_DATA_PAT"] = (
-        pat_data["PAT_FECHA_SERVICIO"] - pat_data["DATA_FECHA_SERVICIO"]
+        pat_data["PAT_FECHA_SERVICIO"]
+        - pat_data["DATA_FECHA_SERVICIO"]
     ).dt.days
 
+    # =========================================================
+    # C. PAT agregado por remesa para unir con TRAYECTOS
+    # =========================================================
     pat_valid = pat_data[pat_data["PAT_REMESA_NORM"].ne("")].copy()
+
     pat_remesa = (
         pat_valid.groupby("PAT_REMESA_NORM", as_index=False)
         .agg(
@@ -341,6 +401,9 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         )
     )
 
+    # =========================================================
+    # D. BASE MAESTRA: TRAYECTOS como base principal
+    # =========================================================
     consolidado = tray.merge(
         pat_remesa,
         left_on="ASTRANS_REMESA_NORM",
@@ -348,15 +411,22 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         how="left",
     )
 
-    consolidado["COINCIDE_REMESA_PAT_ASTRANS"] = consolidado["PAT_REGISTROS"].fillna(0).gt(0)
+    consolidado["COINCIDE_REMESA_PAT_ASTRANS"] = (
+        consolidado["PAT_REGISTROS"].fillna(0).gt(0)
+    )
     consolidado["DIF_DIAS_PAT_ASTRANS"] = (
-        consolidado["ASTRANS_CARGA_FECHA"] - consolidado["PAT_FECHA_SERVICIO"]
+        consolidado["ASTRANS_CARGA_FECHA"]
+        - consolidado["PAT_FECHA_SERVICIO"]
     ).dt.days
 
     consolidado["ESTADO_TRAZABILIDAD"] = np.select(
         [
-            consolidado["COINCIDE_REMESA_PAT_ASTRANS"] & consolidado["COINCIDE_DATA_PAT"].fillna(False),
-            consolidado["COINCIDE_REMESA_PAT_ASTRANS"] & ~consolidado["COINCIDE_DATA_PAT"].fillna(False),
+            consolidado["COINCIDE_REMESA_PAT_ASTRANS"]
+            & consolidado["COINCIDE_DATA_PAT"].fillna(False),
+
+            consolidado["COINCIDE_REMESA_PAT_ASTRANS"]
+            & ~consolidado["COINCIDE_DATA_PAT"].fillna(False),
+
             ~consolidado["COINCIDE_REMESA_PAT_ASTRANS"],
         ],
         [
@@ -369,7 +439,9 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
 
     consolidado["RESULTADO_SERVICIO"] = np.select(
         [
-            consolidado["DATA_CANCELADO"].fillna(False) & consolidado["COINCIDE_REMESA_PAT_ASTRANS"],
+            consolidado["DATA_CANCELADO"].fillna(False)
+            & consolidado["COINCIDE_REMESA_PAT_ASTRANS"],
+
             consolidado["COINCIDE_REMESA_PAT_ASTRANS"],
         ],
         [
@@ -379,13 +451,20 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         default="EJECUTADO EN ASTRANS SIN EVIDENCIA PAT",
     )
 
-    remesas_astrans = set(tray.loc[tray["ASTRANS_REMESA_NORM"].ne(""), "ASTRANS_REMESA_NORM"])
+    remesas_astrans = set(
+        tray.loc[
+            tray["ASTRANS_REMESA_NORM"].ne(""),
+            "ASTRANS_REMESA_NORM",
+        ]
+    )
+
     pat_sin_astrans = pat_remesa[
         ~pat_remesa["PAT_REMESA_NORM"].isin(remesas_astrans)
     ].copy()
 
-    llaves_pat = set(pat["LLAVE_DATA_PAT"])
-    data_sin_pat = data[~data["LLAVE_DATA_PAT"].isin(llaves_pat)].copy()
+    data_sin_pat = cruce_data_pat[
+        ~cruce_data_pat["COINCIDE_DATA_PAT"]
+    ].copy()
 
     duplicados_pat = (
         pat[pat["PAT_REMESA_NORM"].ne("")]
@@ -393,7 +472,9 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         .size()
         .rename(columns={"size": "CANTIDAD_PAT"})
     )
-    duplicados_pat = duplicados_pat[duplicados_pat["CANTIDAD_PAT"] > 1]
+    duplicados_pat = duplicados_pat[
+        duplicados_pat["CANTIDAD_PAT"] > 1
+    ]
 
     duplicados_astrans = (
         tray[tray["ASTRANS_REMESA_NORM"].ne("")]
@@ -405,7 +486,14 @@ def consolidar(data: pd.DataFrame, pat: pd.DataFrame, tray: pd.DataFrame):
         duplicados_astrans["CANTIDAD_ASTRANS"] > 1
     ]
 
-    return consolidado, pat_data, pat_sin_astrans, data_sin_pat, duplicados_pat, duplicados_astrans
+    return (
+        consolidado,
+        cruce_data_pat,
+        pat_sin_astrans,
+        data_sin_pat,
+        duplicados_pat,
+        duplicados_astrans,
+    )
 
 
 def crear_excel(resultados: dict[str, pd.DataFrame]) -> bytes:
@@ -496,21 +584,48 @@ except Exception as exc:
 total = len(consolidado)
 conciliadas = int(consolidado["COINCIDE_REMESA_PAT_ASTRANS"].sum())
 sin_pat = total - conciliadas
+
+total_data = int(len(cruce_data_pat))
+total_cancelados_data = int(cruce_data_pat["DATA_CANCELADO"].fillna(False).sum())
+total_programados_data = int(total_data - total_cancelados_data)
+meses_data = int(
+    cruce_data_pat["DATA_FECHA_SERVICIO"]
+    .dropna()
+    .dt.to_period("M")
+    .nunique()
+)
+
 cancelados_ejecutados = int(
     (consolidado["RESULTADO_SERVICIO"] == "CANCELADO EN DATA, PERO EJECUTADO CON REMESA").sum()
 )
 
+st.markdown("### Histórico operativo DATA")
+data_cols = st.columns(4)
+with data_cols[0]:
+    kpi("Total servicios DATA", entero(total_data), f"{meses_data} meses")
+with data_cols[1]:
+    kpi("Total programados", entero(total_programados_data))
+with data_cols[2]:
+    kpi("Total cancelados", entero(total_cancelados_data))
+with data_cols[3]:
+    kpi("DATA sin PAT", entero(len(data_sin_pat)))
+
+st.markdown("### Conciliación y ejecución")
 cols = st.columns(6)
 with cols[0]:
     kpi("Registros ASTRANS", entero(total), "Base central")
 with cols[1]:
-    kpi("Conciliados PAT–ASTRANS", entero(conciliadas), porcentaje(conciliadas / total * 100 if total else 0))
+    kpi(
+        "Conciliados PAT–ASTRANS",
+        entero(conciliadas),
+        porcentaje(conciliadas / total * 100 if total else 0),
+    )
 with cols[2]:
     kpi("ASTRANS sin PAT", entero(sin_pat))
 with cols[3]:
     kpi("PAT sin ASTRANS", entero(len(pat_sin_astrans)))
 with cols[4]:
-    kpi("DATA sin PAT", entero(len(data_sin_pat)))
+    kpi("Meses DATA", entero(meses_data))
 with cols[5]:
     kpi("Cancelados ejecutados", entero(cancelados_ejecutados))
 
