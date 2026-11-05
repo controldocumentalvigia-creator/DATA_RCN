@@ -1,12 +1,12 @@
-"""RCN Data Factory V11 — conciliación DATA → PAT → TRAYECTOS.
+"""RCN Data Factory V12 — conciliación DATA → PAT → TRAYECTOS.
 Ejecutar: streamlit run "app (1).py"
 """
 import io, re, unicodedata
 import numpy as np
 import pandas as pd
 import streamlit as st
-st.set_page_config(page_title="RCN Data Factory V11",page_icon="🏭",layout="wide")
-st.title("🏭 RCN Data Factory V11 | Base maestra conciliada")
+st.set_page_config(page_title="RCN Data Factory V12",page_icon="🏭",layout="wide")
+st.title("🏭 RCN Data Factory V12 | Base maestra conciliada")
 st.caption("DATA: solicitud inicial · PAT: resultado y remesa SEV · TRAYECTOS: ejecución y valores")
 def norm(x):
     if pd.isna(x): return ''
