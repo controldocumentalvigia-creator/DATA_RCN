@@ -1,4 +1,4 @@
-"""RCN Data Factory V9 — DATA (solicitud) → PAT (resultado) → TRAYECTOS (ejecución).
+"""RCN Data Factory V9.2 — DATA (solicitud) → PAT (resultado) → TRAYECTOS (ejecución).
 Ejecutar: streamlit run 'app (1).py'
 """
 import io
@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title='RCN Data Factory V9', page_icon='🏭', layout='wide')
-st.title('🏭 RCN Data Factory V9 | Conciliación verificable')
+st.set_page_config(page_title='RCN Data Factory V9.2', page_icon='🏭', layout='wide')
+st.title('🏭 RCN Data Factory V9.2 | Conciliación verificable')
 st.caption('DATA = solicitud inicial · PAT = resultado y remesa · TRAYECTOS = ejecución y valores finales')
+st.success('Esta es la Data Factory actualizada. El Excel generado incluye BASE_SOLICITUDES, BASE_MAESTRA_RCN y REVISION_COORDINADOR y es compatible con el Informe Ejecutivo V9.1.')
 
 
 def norm(x):
@@ -67,8 +68,8 @@ def estado_data(x):
 def leer_excel(archivo, preferred, must):
     book = pd.ExcelFile(io.BytesIO(archivo))
     best = None
-    for sh in book.sheet_names:
-        if sh not in preferred: continue
+    for sh in preferred:
+        if sh not in book.sheet_names: continue
         d = pd.read_excel(book, sheet_name=sh)
         if all(col(d, *variants) is not None for variants in must): return sh, d
     for sh in book.sheet_names:
