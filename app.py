@@ -1,19 +1,13 @@
-"""RCN Data Factory V9.2 — DATA (solicitud) → PAT (resultado) → TRAYECTOS (ejecución).
-Ejecutar: streamlit run 'app (1).py'
+"""RCN Data Factory V10 — conciliación DATA → PAT → TRAYECTOS.
+Ejecutar: streamlit run "app (1).py"
 """
-import io
-import re
-import unicodedata
+import io, re, unicodedata
 import numpy as np
 import pandas as pd
 import streamlit as st
-
-st.set_page_config(page_title='RCN Data Factory V9.2', page_icon='🏭', layout='wide')
-st.title('🏭 RCN Data Factory V9.2 | Conciliación verificable')
-st.caption('DATA = solicitud inicial · PAT = resultado y remesa · TRAYECTOS = ejecución y valores finales')
-st.success('Esta es la Data Factory actualizada. El Excel generado incluye BASE_SOLICITUDES, BASE_MAESTRA_RCN y REVISION_COORDINADOR y es compatible con el Informe Ejecutivo V9.1.')
-
-
+st.set_page_config(page_title="RCN Data Factory V10",page_icon="🏭",layout="wide")
+st.title("🏭 RCN Data Factory V10 | Base maestra conciliada")
+st.caption("DATA: solicitud inicial · PAT: resultado y remesa SEV · TRAYECTOS: ejecución y valores")
 def norm(x):
     if pd.isna(x): return ''
     return ''.join(c for c in unicodedata.normalize('NFKD', str(x).upper().strip()) if not unicodedata.combining(c))
@@ -45,7 +39,7 @@ def money(s):
 
 def order(s):
     # Mantener sufijo -000: distintas subórdenes NO deben fusionarse.
-    return s.map(lambda x: re.sub(r'\s+', '', norm(x)).replace('.0', '') if pd.notna(x) else '')
+    return s.map(lambda x: re.sub(r'\.0$', '', re.sub(r'\s+', '', norm(x))) if pd.notna(x) else '')
 
 
 def remesas(x):
@@ -238,12 +232,13 @@ def exportar(hojas):
     return bio.getvalue()
 
 with st.sidebar:
-    f_data=st.file_uploader('1 · DATA RCN',type='xlsx')
-    f_pat=st.file_uploader('2 · SERVICIO PAT',type='xlsx')
-    f_tray=st.file_uploader('3 · TRAYECTOS TODOS',type='xlsx')
-    incluir_base=st.checkbox('Incluir hoja BASE histórica de PAT (marzo–abril)',value=True)
+    st.header("Archivos de origen")
+    f_data=st.file_uploader("1. DATA RCN",type="xlsx",key="data")
+    f_pat=st.file_uploader("2. SERVICIO PAT",type="xlsx",key="pat")
+    f_tray=st.file_uploader("3. TRAYECTOS TODOS",type="xlsx",key="tray")
+    incluir_base=st.checkbox("Incluir hoja histórica BASE de PAT (si corresponde)",value=False,help="Desactivado por defecto: evita mezclar hojas sin validar su cobertura.")
 if not all([f_data,f_pat,f_tray]):
-    st.info('Carga los tres archivos para generar la Base Maestra. Se respetan las fechas y estados originales.')
+    st.info("Carga los tres archivos originales. No necesitas una Base Maestra previa.")
     st.stop()
 try:
     data_sh,raw_data=leer_excel(f_data.getvalue(),['Sheet1'],[('Fecha Servicio',),('Estado Servicio',),('No.OrdenServicio','No. Orden Servicio')])
@@ -255,21 +250,21 @@ try:
         xls=pd.ExcelFile(io.BytesIO(f_pat.getvalue()))
         if 'BASE' in xls.sheet_names:
             hist=preparar_pat(pd.read_excel(xls,sheet_name='BASE'),'BASE')
-            # Evita duplicados exactos entre hojas, preserva eventos distintos.
             pat=pd.concat([pat,hist],ignore_index=True).drop_duplicates(subset=['LLAVE_DATA_PAT','PAT_REMESAS_ORIGINAL','PAT_ESTADO'])
             pat['PAT_ID']=np.arange(1,len(pat)+1)
     tray=preparar_tray(raw_tray)
     hojas=conciliar(data,pat,tray)
 except Exception as e:
-    st.exception(e);st.stop()
-
-c1,c2,c3,c4,c5=st.columns(5)
-c1.metric('Solicitudes DATA',len(data));c2.metric('Registros PAT',len(pat));c3.metric('Filas TRAYECTOS',len(tray))
-c4.metric('Remesas únicas TRAYECTOS',tray.loc[tray.ASTRANS_REMESA_NORM.ne(''),'ASTRANS_REMESA_NORM'].nunique())
-c5.metric('Alertas coordinador',len(hojas['REVISION_COORDINADOR']))
-st.warning('Una remesa SEV prevalece sobre Estado=Cancelado en PAT. La inconsistencia se conserva para revisión del coordinador. La remesa no reemplaza la validación de estado y valor en ASTRANS.')
-st.info('PAT no tiene necesariamente cobertura histórica completa: las ausencias se clasifican SIN PAT, no como cancelaciones.')
-for name in ['BASE_SOLICITUDES','BASE_MAESTRA_RCN','REVISION_COORDINADOR','DETALLE_PAT','PUENTE_REMESAS']:
-    with st.expander(f'{name} · {len(hojas[name]):,} filas',expanded=name=='REVISION_COORDINADOR'):
-        st.dataframe(hojas[name].head(500),use_container_width=True,hide_index=True)
-st.download_button('📥 Descargar BASE_MAESTRA_RCN_ACTUALIZADA.xlsx',exportar(hojas),file_name='BASE_MAESTRA_RCN_ACTUALIZADA.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
+    st.error("No se pudieron conciliar las fuentes. Comprueba encabezados y formatos.")
+    with st.expander("Detalle técnico"):st.exception(e)
+    st.stop()
+st.success("Base Maestra V10 generada correctamente. Compatible con el Informe Ejecutivo V10.")
+a=st.columns(5)
+for box,label,value in zip(a,['Solicitudes DATA','Filas PAT','Filas TRAYECTOS','Remesas TRAYECTOS únicas','Revisión coordinador'],[len(data),len(pat),len(tray),tray.loc[tray.ASTRANS_REMESA_NORM.ne(''),'ASTRANS_REMESA_NORM'].nunique(),len(hojas['REVISION_COORDINADOR'])]):box.metric(label,f"{value:,}".replace(',','.'))
+st.caption(f"Hojas leídas: DATA={data_sh}; PAT={pat_sh}; TRAYECTOS={tray_sh}.")
+st.warning("Regla: si PAT tiene remesa SEV y Estado Cancelado, prevalece SEV y se genera alerta de corrección para el coordinador. Las fuentes originales se conservan.")
+st.info("Una remesa SEV acredita el servicio según la regla operativa. El estado ASTRANS determina si el cierre es cumplido, cumplido operativo, pendiente o anulado; no se equiparan automáticamente estos estados.")
+for nombre in ['BASE_SOLICITUDES','BASE_MAESTRA_RCN','REVISION_COORDINADOR','DETALLE_PAT','PUENTE_REMESAS','DATA_SIN_PAT','PAT_SIN_ASTRANS']:
+    with st.expander(f"{nombre} ({len(hojas[nombre]):,} filas)",expanded=nombre=='REVISION_COORDINADOR'):
+        st.dataframe(hojas[nombre].head(500),use_container_width=True,hide_index=True)
+st.download_button("📥 Descargar BASE_MAESTRA_RCN_ACTUALIZADA.xlsx",exportar(hojas),file_name="BASE_MAESTRA_RCN_ACTUALIZADA.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
