@@ -1,12 +1,12 @@
-"""RCN Data Factory V12 — conciliación DATA → PAT → TRAYECTOS.
+"""RCN Data Factory V11 — conciliación DATA → PAT → TRAYECTOS.
 Ejecutar: streamlit run "app (1).py"
 """
 import io, re, unicodedata
 import numpy as np
 import pandas as pd
 import streamlit as st
-st.set_page_config(page_title="RCN Data Factory V12",page_icon="🏭",layout="wide")
-st.title("🏭 RCN Data Factory V12 | Base maestra conciliada")
+st.set_page_config(page_title="RCN Data Factory V11",page_icon="🏭",layout="wide")
+st.title("🏭 RCN Data Factory V11 | Base maestra conciliada")
 st.caption("DATA: solicitud inicial · PAT: resultado y remesa SEV · TRAYECTOS: ejecución y valores")
 def norm(x):
     if pd.isna(x): return ''
@@ -258,11 +258,24 @@ except Exception as e:
     st.error("No se pudieron conciliar las fuentes. Comprueba encabezados y formatos.")
     with st.expander("Detalle técnico"):st.exception(e)
     st.stop()
-st.success("Base Maestra V10 generada correctamente. Compatible con el Informe Ejecutivo V10.")
+st.success("Base Maestra V11.2 generada correctamente. Compatible con el Informe Ejecutivo de este paquete.")
 a=st.columns(5)
 for box,label,value in zip(a,['Solicitudes DATA','Filas PAT','Filas TRAYECTOS','Remesas TRAYECTOS únicas','Revisión coordinador'],[len(data),len(pat),len(tray),tray.loc[tray.ASTRANS_REMESA_NORM.ne(''),'ASTRANS_REMESA_NORM'].nunique(),len(hojas['REVISION_COORDINADOR'])]):box.metric(label,f"{value:,}".replace(',','.'))
 st.caption(f"Hojas leídas: DATA={data_sh}; PAT={pat_sh}; TRAYECTOS={tray_sh}.")
 st.warning("Regla: si PAT tiene remesa SEV y Estado Cancelado, prevalece SEV y se genera alerta de corrección para el coordinador. Las fuentes originales se conservan.")
+st.subheader('Control adicional PAT — servicios gestionados, cancelados y pendientes')
+pat_unico=pat.groupby('LLAVE_DATA_PAT',as_index=False).agg(
+    PAT_TIENE_SEV=('PAT_TIENE_SEV','max'),PAT_CANCELADO=('PAT_CANCELADO','max'),
+    PAT_FECHA_SERVICIO=('PAT_FECHA_SERVICIO','min'))
+pat_unico['RESULTADO_CONTROL']=np.select([pat_unico.PAT_TIENE_SEV,pat_unico.PAT_CANCELADO],
+    ['GESTIONADO_CON_SEV','CANCELADO_SIN_SEV'],default='PENDIENTE_VALIDACION')
+pat_unico['MES']=pat_unico.PAT_FECHA_SERVICIO.dt.strftime('%Y-%m')
+control_pat=pat_unico.groupby(['MES','RESULTADO_CONTROL'],dropna=False).size().unstack(fill_value=0)
+for nombre in ['GESTIONADO_CON_SEV','CANCELADO_SIN_SEV','PENDIENTE_VALIDACION']:
+    if nombre not in control_pat:control_pat[nombre]=0
+st.dataframe(control_pat.reset_index(),hide_index=True,use_container_width=True)
+st.caption('PAT disponible únicamente en los meses incluidos en el archivo: meses ausentes son N/D. Cada fecha + orden cuenta una vez; una SEV prevalece ante cancelación contradictoria.')
+
 st.info("Una remesa SEV acredita el servicio según la regla operativa. El estado ASTRANS determina si el cierre es cumplido, cumplido operativo, pendiente o anulado; no se equiparan automáticamente estos estados.")
 for nombre in ['BASE_SOLICITUDES','BASE_MAESTRA_RCN','REVISION_COORDINADOR','DETALLE_PAT','PUENTE_REMESAS','DATA_SIN_PAT','PAT_SIN_ASTRANS']:
     with st.expander(f"{nombre} ({len(hojas[nombre]):,} filas)",expanded=nombre=='REVISION_COORDINADOR'):
